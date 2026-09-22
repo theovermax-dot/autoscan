@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+TYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
@@ -7,24 +7,42 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;700&display=swap">
 <style>
   :root{
-    --bg:#100f0d;
-    --bg-2:#181611;
-    --surface:#1c1a16;
-    --surface-2:#252220;
-    --text:#f2efe9;
-    --muted:#9a9284;
-    --border:#332f28;
-    --border-2:#433d33;
-    --accent:#5ab4ff;
-    --accent-dim:#2f7cc4;
-    --accent-ink:#071018;
-    --accent-soft:#16273a;
-    --success:#8fe3ac;
-    --success-soft:#16281d;
-    --warning:#f3c26b;
-    --warning-soft:#332811;
-    --danger:#f3a29c;
-    --danger-soft:#331d1a;
+    --bg:
+#100f0d;
+    --bg-2:
+#181611;
+    --surface:
+#1c1a16;
+    --surface-2:
+#252220;
+    --text:
+#f2efe9;
+    --muted:
+#9a9284;
+    --border:
+#332f28;
+    --border-2:
+#433d33;
+    --accent:
+#5ab4ff;
+    --accent-dim:
+#2f7cc4;
+    --accent-ink:
+#071018;
+    --accent-soft:
+#16273a;
+    --success:
+#8fe3ac;
+    --success-soft:
+#16281d;
+    --warning:
+#f3c26b;
+    --warning-soft:
+#332811;
+    --danger:
+#f3a29c;
+    --danger-soft:
+#331d1a;
   }
 
   *{ box-sizing:border-box; }
@@ -82,6 +100,7 @@
   }
   @media (max-width:640px){ .hero{ grid-template-columns:1fr; padding:22px 20px 26px; } }
 
+  .scan-visual{ position:relative; }
   .scan-frame{
     position:relative; aspect-ratio:1/1; border:1px solid var(--accent); border-radius:6px;
     display:flex; align-items:center; justify-content:center; background:var(--surface);
@@ -302,25 +321,27 @@
   </div>
 
   <div class="hero">
-    <div class="scan-frame">
-      <div class="corner tl"></div><div class="corner tr"></div>
-      <div class="corner bl"></div><div class="corner br"></div>
-      <div class="scan-line"></div>
+    <div class="scan-visual">
+      <div class="scan-frame">
+        <div class="corner tl"></div><div class="corner tr"></div>
+        <div class="corner bl"></div><div class="corner br"></div>
+        <div class="scan-line"></div>
 
-      <svg class="car" viewBox="0 0 200 90" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 62 L22 34 Q30 24 44 22 L128 22 Q142 22 150 34 L172 46 Q184 48 184 58 L184 66 L12 66 Z"/>
-        <path d="M44 22 L52 40 L118 40 L128 22" />
-        <line x1="12" y1="58" x2="184" y2="58"/>
-        <circle cx="52" cy="66" r="11"/>
-        <circle cx="150" cy="66" r="11"/>
-      </svg>
+        <svg class="car" viewBox="0 0 200 90" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 62 L22 34 Q30 24 44 22 L128 22 Q142 22 150 34 L172 46 Q184 48 184 58 L184 66 L12 66 Z"/>
+          <path d="M44 22 L52 40 L118 40 L128 22" />
+          <line x1="12" y1="58" x2="184" y2="58"/>
+          <circle cx="52" cy="66" r="11"/>
+          <circle cx="150" cy="66" r="11"/>
+        </svg>
 
-      <div class="detect-dot" style="left:26%; top:70%;"></div>
-      <div class="detect-tag" style="left:30%; top:75%;">Скол</div>
-      <div class="detect-dot" style="left:70%; top:58%;"></div>
-      <div class="detect-tag" style="left:74%; top:50%;">Ржавчина</div>
+        <div class="detect-dot" style="left:26%; top:70%;"></div>
+        <div class="detect-tag" style="left:30%; top:75%;">Скол</div>
+        <div class="detect-dot" style="left:70%; top:58%;"></div>
+        <div class="detect-tag" style="left:74%; top:50%;">Ржавчина</div>
 
-      <span class="scan-tag">SCAN 01</span>
+        <span class="scan-tag">SCAN 01</span>
+      </div>
 
       <div class="float-chip a">⚡ <b>~10 сек</b> анализ</div>
       <div class="float-chip b">🎯 <b>3</b> фото за раз</div>
@@ -490,7 +511,9 @@
     upstream_error: 'Небольшой сбой на стороне сервиса — попробуйте ещё раз.',
     invalid_json: 'Ответ пришёл в неожиданном формате — нажмите ещё раз.',
     server_error: 'Небольшой сбой — попробуйте ещё раз через минуту.',
-    network_error: 'Не удалось связаться с сервером — проверьте интернет-соединение и попробуйте снова.'
+    network_error: 'Не удалось связаться с сервером — проверьте интернет-соединение и попробуйте снова.',
+    rate_limited: 'Слишком много запросов подряд — подождите минуту и попробуйте снова.',
+    model_overloaded: 'Сервис сейчас перегружен — подождите полминуты и попробуйте ещё раз.'
   };
 
   function showFriendlyError(e) {
@@ -725,7 +748,7 @@
   function parseJSONLoose(text) {
     if (typeof text !== 'string') return null;
     try { return JSON.parse(text); } catch (e) {}
-    var fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    var fenceMatch = text.match(/(?:json)?\s*([\s\S]*?)/i);
     if (fenceMatch) {
       try { return JSON.parse(fenceMatch[1].trim()); } catch (e) {}
     }
