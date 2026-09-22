@@ -49,25 +49,46 @@ module.exports = async function handler(req, res) {
       return { role: t.role === 'assistant' ? 'model' : 'user', parts: parts };
     });
 
-    var model = 'gemini-flash-latest';
-    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(apiKey);
-
-    var upstream = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        contents: contents,
-        generationConfig: { maxOutputTokens: 2048, response_mime_type: 'application/json' }
-      })
+    // Основная модель и запасная (с отдельной очередью/квотой) на случай перегрузки основной.
+    var models = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
+    var requestBody = JSON.stringify({
+      contents: contents,
+      generationConfig: { maxOutputTokens: 2048, response_mime_type: 'application/json' }
     });
 
-    var data = await upstream.json().catch(function () { return null; });
+    function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+
+    var upstream, data;
+    var attemptsPerModel = 2;
+    outer:
+    for (var m = 0; m < models.length; m++) {
+      var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + models[m] + ':generateContent?key=' + encodeURIComponent(apiKey);
+      for (var attempt = 1; attempt <= attemptsPerModel; attempt++) {
+        upstream = await fetch(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: requestBody
+        });
+        data = await upstream.json().catch(function () { return null; });
+
+        if (upstream.ok) break outer;
+
+        var isOverloaded = upstream.status === 503 || upstream.status === 429;
+        console.error('Gemini error [' + models[m] + '] attempt ' + attempt + '/' + attemptsPerModel, upstream.status, (data && data.error && data.error.message) || '');
+        if (!isOverloaded) break outer;
+        if (attempt < attemptsPerModel) await wait(attempt * 700);
+      }
+      // модель исчерпала попытки — переходим к следующей модели в списке (если есть)
+    }
 
     if (!upstream.ok) {
       var msg = (data && data.error && data.error.message) || ('Upstream error ' + upstream.status);
-      console.error('Gemini upstream error', upstream.status, msg);
       if (upstream.status === 429) {
         res.status(429).json({ error: 'rate_limited', message: msg });
+        return;
+      }
+      if (upstream.status === 503) {
+        res.status(503).json({ error: 'model_overloaded', message: msg });
         return;
       }
       res.status(upstream.status >= 400 && upstream.status < 500 ? 400 : 502).json({ error: 'upstream_error', message: msg });
