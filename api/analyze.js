@@ -57,7 +57,7 @@ module.exports = async function handler(req, res) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         contents: contents,
-        generationConfig: { maxOutputTokens: 1500 }
+        generationConfig: { maxOutputTokens: 2048, response_mime_type: 'application/json' }
       })
     });
 
@@ -65,6 +65,11 @@ module.exports = async function handler(req, res) {
 
     if (!upstream.ok) {
       var msg = (data && data.error && data.error.message) || ('Upstream error ' + upstream.status);
+      console.error('Gemini upstream error', upstream.status, msg);
+      if (upstream.status === 429) {
+        res.status(429).json({ error: 'rate_limited', message: msg });
+        return;
+      }
       res.status(upstream.status >= 400 && upstream.status < 500 ? 400 : 502).json({ error: 'upstream_error', message: msg });
       return;
     }
@@ -74,12 +79,15 @@ module.exports = async function handler(req, res) {
     var text = parts.map(function (p) { return (p && p.text) || ''; }).join('');
 
     if (!text) {
-      res.status(502).json({ error: 'upstream_error', message: 'Empty response from model (finishReason: ' + (candidate && candidate.finishReason) + ')' });
+      var reason = candidate && candidate.finishReason;
+      console.error('Gemini empty response, finishReason:', reason, JSON.stringify(data));
+      res.status(502).json({ error: 'upstream_error', message: 'Empty response from model (finishReason: ' + reason + ')' });
       return;
     }
 
     res.status(200).json({ text: text });
   } catch (err) {
+    console.error('analyze.js crashed:', err);
     res.status(500).json({ error: 'server_error', message: String((err && err.message) || err) });
   }
 };
