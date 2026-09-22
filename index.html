@@ -1,4 +1,4 @@
-TYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
@@ -7,42 +7,24 @@ TYPE html>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;700&display=swap">
 <style>
   :root{
-    --bg:
-#100f0d;
-    --bg-2:
-#181611;
-    --surface:
-#1c1a16;
-    --surface-2:
-#252220;
-    --text:
-#f2efe9;
-    --muted:
-#9a9284;
-    --border:
-#332f28;
-    --border-2:
-#433d33;
-    --accent:
-#5ab4ff;
-    --accent-dim:
-#2f7cc4;
-    --accent-ink:
-#071018;
-    --accent-soft:
-#16273a;
-    --success:
-#8fe3ac;
-    --success-soft:
-#16281d;
-    --warning:
-#f3c26b;
-    --warning-soft:
-#332811;
-    --danger:
-#f3a29c;
-    --danger-soft:
-#331d1a;
+    --bg:#100f0d;
+    --bg-2:#181611;
+    --surface:#1c1a16;
+    --surface-2:#252220;
+    --text:#f2efe9;
+    --muted:#9a9284;
+    --border:#332f28;
+    --border-2:#433d33;
+    --accent:#5ab4ff;
+    --accent-dim:#2f7cc4;
+    --accent-ink:#071018;
+    --accent-soft:#16273a;
+    --success:#8fe3ac;
+    --success-soft:#16281d;
+    --warning:#f3c26b;
+    --warning-soft:#332811;
+    --danger:#f3a29c;
+    --danger-soft:#331d1a;
   }
 
   *{ box-sizing:border-box; }
@@ -113,7 +95,7 @@ TYPE html>
   .corner.bl{ bottom:-1px; left:-1px; border-bottom:2px solid; border-left:2px solid; }
   .corner.br{ bottom:-1px; right:-1px; border-bottom:2px solid; border-right:2px solid; }
   .scan-tag{
-    position:absolute; left:10px; bottom:10px; font-size:10.5px; letter-spacing:.1em;
+    position:absolute; left:10px; top:10px; font-size:10.5px; letter-spacing:.1em;
     color:var(--accent); font-weight:700; font-variant-numeric:tabular-nums; z-index:2;
   }
   .scan-line{
@@ -335,8 +317,8 @@ TYPE html>
           <circle cx="150" cy="66" r="11"/>
         </svg>
 
-        <div class="detect-dot" style="left:26%; top:70%;"></div>
-        <div class="detect-tag" style="left:30%; top:75%;">Скол</div>
+        <div class="detect-dot" style="left:29%; top:43%;"></div>
+        <div class="detect-tag" style="left:33%; top:36%;">Скол</div>
         <div class="detect-dot" style="left:70%; top:58%;"></div>
         <div class="detect-tag" style="left:74%; top:50%;">Ржавчина</div>
 
@@ -748,7 +730,7 @@ TYPE html>
   function parseJSONLoose(text) {
     if (typeof text !== 'string') return null;
     try { return JSON.parse(text); } catch (e) {}
-    var fenceMatch = text.match(/(?:json)?\s*([\s\S]*?)/i);
+    var fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
     if (fenceMatch) {
       try { return JSON.parse(fenceMatch[1].trim()); } catch (e) {}
     }
