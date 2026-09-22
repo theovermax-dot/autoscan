@@ -1,83 +1,880 @@
-// Серверная функция для Vercel: принимает фото + переписку с фронтенда
-// и обращается к Anthropic API от имени владельца сайта (по ключу из переменной окружения).
-// Никаких npm-зависимостей не требуется — используется встроенный fetch (Node.js 18+).
-
-module.exports = async function handler(req, res) {
-  if (req.method !== 'POST') {
-    res.status(405).json({ error: 'bad_request', message: 'Method not allowed' });
-    return;
+YPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>АвтоСкан — AI-диагностика авто по фото</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;700&display=swap">
+<style>
+  :root{
+    --bg:#100f0d;
+    --bg-2:#181611;
+    --surface:#1c1a16;
+    --surface-2:#252220;
+    --text:#f2efe9;
+    --muted:#9a9284;
+    --border:#332f28;
+    --border-2:#433d33;
+    --accent:#5ab4ff;
+    --accent-dim:#2f7cc4;
+    --accent-ink:#071018;
+    --accent-soft:#16273a;
+    --success:#8fe3ac;
+    --success-soft:#16281d;
+    --warning:#f3c26b;
+    --warning-soft:#332811;
+    --danger:#f3a29c;
+    --danger-soft:#331d1a;
   }
 
-  var apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    res.status(500).json({ error: 'server_misconfigured', message: 'ANTHROPIC_API_KEY is not set' });
-    return;
+  *{ box-sizing:border-box; }
+  html, body{ margin:0; padding:0; }
+  body{
+    background:
+      radial-gradient(ellipse 820px 460px at 20% -12%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 62%),
+      radial-gradient(ellipse 640px 420px at 100% 10%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 60%),
+      repeating-linear-gradient(0deg, color-mix(in srgb, var(--accent) 5%, transparent) 0 1px, transparent 1px 46px),
+      repeating-linear-gradient(90deg, color-mix(in srgb, var(--accent) 5%, transparent) 0 1px, transparent 1px 46px),
+      var(--bg);
+    color:var(--text);
+    font-family:"Inter", -apple-system, "Segoe UI", sans-serif;
+    padding-inline:16px;
+    padding-block:22px 56px;
+    position:relative;
+    min-height:100vh;
+  }
+  .grain{
+    position:fixed; inset:0; pointer-events:none; z-index:0; opacity:.05; mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='90'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .serif{ font-family:"Fraunces", Georgia, serif; }
+
+  .wrap{ max-width:760px; margin-inline:auto; display:flex; flex-direction:column; gap:26px; position:relative; z-index:1; }
+
+  a{ color:inherit; }
+
+  /* top bar */
+  .topbar{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .brand{ display:flex; align-items:center; gap:10px; }
+  .brand-mark{
+    width:32px; height:32px; border-radius:8px; background:var(--accent);
+    color:var(--accent-ink); display:flex; align-items:center; justify-content:center;
+    font-size:16px; flex:none;
+  }
+  .brand span{
+    font-size:13px; font-weight:700; letter-spacing:.14em; text-transform:uppercase;
+  }
+  .nav{ display:flex; gap:22px; }
+  .nav a{
+    font-size:11.5px; font-weight:600; letter-spacing:.1em; text-transform:uppercase;
+    text-decoration:none; color:var(--muted);
+  }
+  .nav a:hover{ color:var(--text); }
+  @media (max-width:520px){ .nav{ display:none; } }
+
+  /* hero */
+  .hero{
+    display:grid; grid-template-columns:1fr 1.15fr; gap:34px; align-items:center;
+    border:1px solid var(--border); border-radius:10px; padding:30px;
+    background:linear-gradient(180deg, var(--bg-2), var(--bg));
+    position:relative; overflow:visible;
+    box-shadow:0 20px 60px -20px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  @media (max-width:640px){ .hero{ grid-template-columns:1fr; padding:22px 20px 26px; } }
+
+  .scan-visual{ position:relative; }
+  .scan-frame{
+    position:relative; aspect-ratio:1/1; border:1px solid var(--accent); border-radius:6px;
+    display:flex; align-items:center; justify-content:center; background:var(--surface);
+    overflow:hidden;
+  }
+  .scan-frame svg.car{ width:70%; height:auto; color:var(--muted); opacity:.9; }
+  .corner{ position:absolute; width:16px; height:16px; border-color:var(--accent); opacity:.9; z-index:2; }
+  .corner.tl{ top:-1px; left:-1px; border-top:2px solid; border-left:2px solid; }
+  .corner.tr{ top:-1px; right:-1px; border-top:2px solid; border-right:2px solid; }
+  .corner.bl{ bottom:-1px; left:-1px; border-bottom:2px solid; border-left:2px solid; }
+  .corner.br{ bottom:-1px; right:-1px; border-bottom:2px solid; border-right:2px solid; }
+  .scan-tag{
+    position:absolute; left:10px; bottom:10px; font-size:10.5px; letter-spacing:.1em;
+    color:var(--accent); font-weight:700; font-variant-numeric:tabular-nums; z-index:2;
+  }
+  .scan-line{
+    position:absolute; left:4%; right:4%; height:2px; background:var(--accent);
+    box-shadow:0 0 12px 2px color-mix(in srgb, var(--accent) 80%, transparent);
+    animation:sweep 3.2s ease-in-out infinite; z-index:1;
+  }
+  @keyframes sweep{
+    0%{ top:8%; opacity:0; } 8%{ opacity:1; } 50%{ top:88%; opacity:1; } 58%{ opacity:0; } 100%{ top:8%; opacity:0; }
+  }
+  .detect-dot{
+    position:absolute; width:8px; height:8px; border-radius:50%; background:var(--accent);
+    box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent); z-index:2;
+    animation:pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse{ 0%,100%{ transform:scale(1); } 50%{ transform:scale(1.3); } }
+  .detect-tag{
+    position:absolute; font-size:9.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+    color:var(--text); background:color-mix(in srgb, var(--bg) 80%, transparent); border:1px solid var(--border-2);
+    padding:2px 6px; border-radius:3px; z-index:2; white-space:nowrap;
+  }
+  .float-chip{
+    position:absolute; background:var(--surface); border:1px solid var(--border-2); border-radius:8px;
+    padding:8px 12px; font-size:11px; font-weight:600; color:var(--text); display:flex; align-items:center; gap:6px;
+    box-shadow:0 10px 24px -8px rgba(0,0,0,.5); z-index:3;
+  }
+  .float-chip b{ color:var(--accent); font-variant-numeric:tabular-nums; }
+  .float-chip.a{ top:-14px; right:-10px; }
+  .float-chip.b{ bottom:-14px; left:-10px; }
+  @media (max-width:640px){ .float-chip{ display:none; } }
+
+  .hero-copy .eyebrow{ color:var(--accent); }
+  .hero-copy h1{
+    font-size:clamp(32px,6vw,46px); line-height:1.03; font-weight:600; margin:10px 0 0;
+    text-wrap:balance;
+  }
+  .hero-copy h1 em{ font-style:italic; color:var(--accent); }
+  .hero-copy .lede{
+    font-size:15.5px; color:var(--muted); line-height:1.6; margin-top:14px; max-width:44ch;
   }
 
-  var body = req.body;
-  if (typeof body === 'string') {
-    try { body = JSON.parse(body); } catch (e) { body = null; }
+  .eyebrow{
+    font-size:11px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; margin:0;
   }
 
-  var turns = body && Array.isArray(body.turns) ? body.turns : null;
-  var images = body && Array.isArray(body.images) ? body.images : [];
-
-  if (!turns || turns.length === 0) {
-    res.status(400).json({ error: 'bad_request', message: 'turns is required' });
-    return;
+  .btn{
+    appearance:none; border:none; border-radius:6px; padding:13px 20px; font-size:12.5px;
+    font-weight:700; letter-spacing:.08em; text-transform:uppercase; cursor:pointer;
+    background:var(--accent); color:var(--accent-ink);
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    box-shadow:0 8px 20px -8px color-mix(in srgb, var(--accent) 70%, transparent);
   }
-  if (images.length > 3) {
-    res.status(400).json({ error: 'bad_request', message: 'too many images' });
-    return;
+  .btn:disabled{ opacity:.4; cursor:not-allowed; box-shadow:none; }
+  .btn.block{ width:100%; margin-top:16px; }
+  .btn.ghost{ background:transparent; color:var(--text); border:1px solid var(--border-2); box-shadow:none; }
+  .hero-copy .btn{ margin-top:22px; }
+
+  .spinner{
+    width:14px; height:14px; border-radius:50%;
+    border:2px solid color-mix(in srgb, var(--accent-ink) 35%, transparent);
+    border-top-color:var(--accent-ink); animation:spin .7s linear infinite; flex:none;
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  /* value strip */
+  .stats{
+    display:grid; grid-template-columns:repeat(3,1fr); border:1px solid var(--border); border-radius:10px;
+    background:var(--surface); overflow:hidden;
+  }
+  .stat{ padding:16px 10px; text-align:center; border-left:1px solid var(--border); }
+  .stat:first-child{ border-left:none; }
+  .stat b{ display:block; font-size:20px; font-weight:700; color:var(--accent); font-variant-numeric:tabular-nums; }
+  .stat span{ display:block; font-size:11px; color:var(--muted); margin-top:3px; letter-spacing:.02em; }
+
+  /* cards */
+  .card{
+    background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:24px;
+    position:relative; overflow:hidden;
+    box-shadow:0 16px 40px -24px rgba(0,0,0,.6);
+  }
+  .card::before{
+    content:""; position:absolute; top:0; left:0; right:0; height:2px;
+    background:linear-gradient(90deg, var(--accent), transparent 70%);
   }
 
-  try {
-    var messages = turns.map(function (t, idx) {
-      var isLastUser = idx === turns.length - 1 && t.role === 'user';
-      if (isLastUser && images.length > 0) {
-        var content = images.map(function (img) {
-          return {
-            type: 'image',
-            source: {
-              type: 'base64',
-              media_type: img.mediaType || 'image/jpeg',
-              data: img.data
-            }
-          };
-        });
-        content.push({ type: 'text', text: String(t.content || '') });
-        return { role: 'user', content: content };
-      }
-      return { role: t.role === 'assistant' ? 'assistant' : 'user', content: String(t.content || '') };
+  .dropzone{
+    border:1px dashed var(--border-2); border-radius:8px; padding:26px 16px;
+    text-align:center; cursor:pointer; background:var(--surface-2);
+    transition:border-color .15s ease, background .15s ease, transform .15s ease;
+  }
+  .dropzone:hover, .dropzone.drag{ border-color:var(--accent); background:var(--accent-soft); }
+  .dropzone:hover svg{ transform:translateY(-2px); }
+  .dropzone svg{ width:26px; height:26px; color:var(--muted); transition:transform .15s ease; }
+  .dropzone .dz-title{ font-weight:600; margin-top:8px; font-size:14px; }
+  .dropzone .dz-sub{ color:var(--muted); font-size:12px; margin-top:2px; }
+  input[type=file]{ display:none; }
+
+  .thumbs{ display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+  .thumb{ position:relative; width:68px; height:68px; border-radius:6px; overflow:hidden; border:1px solid var(--border); flex:none; }
+  .thumb img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .thumb button{
+    position:absolute; top:2px; right:2px; width:18px; height:18px; border-radius:50%;
+    border:none; background:rgba(0,0,0,.65); color:#fff; font-size:11px; line-height:1;
+    cursor:pointer; display:flex; align-items:center; justify-content:center;
+  }
+
+  .status{ color:var(--muted); font-size:13px; margin-top:10px; text-align:center; }
+  .error{
+    margin-top:12px; padding:12px 14px; border-radius:6px; font-size:13.5px;
+    background:var(--danger-soft); color:var(--danger); line-height:1.5; border:1px solid var(--danger);
+  }
+
+  /* result */
+  .result-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  .result-head h2{ font-size:20px; font-weight:600; line-height:1.3; margin:0; }
+  .badge{
+    flex:none; font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+    padding:5px 10px; border-radius:999px; border:1px solid transparent;
+  }
+  .badge.low{ background:var(--success-soft); color:var(--success); border-color:var(--success); }
+  .badge.medium{ background:var(--warning-soft); color:var(--warning); border-color:var(--warning); }
+  .badge.high{ background:var(--danger-soft); color:var(--danger); border-color:var(--danger); }
+
+  .desc{ color:var(--text); font-size:14.5px; line-height:1.6; margin-top:10px; }
+  .fix{
+    margin-top:14px; padding:12px 14px; border-radius:6px; background:var(--surface-2);
+    font-size:14px; line-height:1.55; border-left:3px solid var(--accent);
+  }
+  .fix b{ display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin-bottom:4px; font-weight:700; }
+
+  .metrics{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; }
+  .metric{ background:var(--surface-2); border-radius:6px; padding:12px 14px; border:1px solid var(--border); }
+  .metric b{ display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); font-weight:700; margin-bottom:4px; }
+  .metric span{ font-size:19px; font-weight:700; font-variant-numeric:tabular-nums; }
+
+  .note{ color:var(--muted); font-size:12px; margin-top:14px; line-height:1.5; }
+
+  .steps{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:14px; position:relative; }
+  .steps::before{
+    content:""; position:absolute; top:12px; left:12%; right:12%; height:1px; background:var(--border-2);
+  }
+  @media (max-width:640px){
+    .steps{ grid-template-columns:1fr; }
+    .steps::before{ display:none; }
+  }
+  .step{ display:flex; flex-direction:column; gap:8px; position:relative; }
+  .step-num{
+    width:24px; height:24px; border-radius:50%; border:1px solid var(--accent); background:var(--surface);
+    color:var(--accent); font-size:11.5px; font-weight:700; display:flex; align-items:center;
+    justify-content:center; font-variant-numeric:tabular-nums; z-index:1;
+  }
+  .step-text b{ font-size:14px; font-weight:600; }
+  .step-text p{ margin:2px 0 0; color:var(--muted); font-size:13px; line-height:1.5; }
+
+  .example-tag{
+    display:inline-block; font-size:10.5px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.08em; color:var(--muted); border:1px solid var(--border-2); border-radius:4px;
+    padding:3px 8px; margin-bottom:10px;
+  }
+
+  .issue-item + .issue-item{ margin-top:20px; padding-top:20px; border-top:1px solid var(--border); }
+
+  .ignored{
+    margin-top:10px; padding:10px 12px; border-radius:6px; font-size:13px; line-height:1.5;
+    background:var(--warning-soft); color:var(--warning); border:1px solid var(--warning);
+  }
+
+  .btn.small{ padding:9px 14px; font-size:11px; }
+  .find-master{ margin-top:12px; text-decoration:none; }
+
+  .clarify{
+    margin-top:14px; padding:14px; border-radius:8px; background:var(--surface-2); border:1px solid var(--border-2);
+  }
+  .clarify-q{ font-size:14px; margin:0 0 10px; line-height:1.5; }
+  .clarify-row{ display:flex; gap:8px; }
+  .clarify-row input{
+    flex:1; min-width:0; background:var(--bg-2); border:1px solid var(--border-2); border-radius:6px;
+    padding:10px 12px; color:var(--text); font-size:13.5px; font-family:inherit;
+  }
+  .clarify-row input:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+  .clarify-row .btn{ margin-top:0; padding:10px 16px; }
+
+  .tips{ margin-top:14px; padding:12px 14px; border-radius:6px; background:var(--surface-2); border:1px solid var(--border); font-size:12.5px; color:var(--muted); line-height:1.6; }
+  .tips b{ color:var(--text); }
+
+  footer{ text-align:center; color:var(--muted); font-size:12px; margin-top:4px; }
+
+  [hidden]{ display:none !important; }
+</style>
+</head>
+<body>
+
+<div class="grain"></div>
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark">🚗</div>
+      <span>АвтоСкан</span>
+    </div>
+    <div class="nav">
+      <a href="#uploadCard">Оценка</a>
+      <a href="#howCard">Как это работает</a>
+    </div>
+  </div>
+
+  <div class="hero">
+    <div class="scan-visual">
+      <div class="scan-frame">
+        <div class="corner tl"></div><div class="corner tr"></div>
+        <div class="corner bl"></div><div class="corner br"></div>
+        <div class="scan-line"></div>
+
+        <svg class="car" viewBox="0 0 200 90" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 62 L22 34 Q30 24 44 22 L128 22 Q142 22 150 34 L172 46 Q184 48 184 58 L184 66 L12 66 Z"/>
+          <path d="M44 22 L52 40 L118 40 L128 22" />
+          <line x1="12" y1="58" x2="184" y2="58"/>
+          <circle cx="52" cy="66" r="11"/>
+          <circle cx="150" cy="66" r="11"/>
+        </svg>
+
+        <div class="detect-dot" style="left:26%; top:70%;"></div>
+        <div class="detect-tag" style="left:30%; top:75%;">Скол</div>
+        <div class="detect-dot" style="left:70%; top:58%;"></div>
+        <div class="detect-tag" style="left:74%; top:50%;">Ржавчина</div>
+
+        <span class="scan-tag">SCAN 01</span>
+      </div>
+
+      <div class="float-chip a">⚡ <b>~10 сек</b> анализ</div>
+      <div class="float-chip b">🎯 <b>3</b> фото за раз</div>
+    </div>
+    <div class="hero-copy">
+      <p class="eyebrow">AI-диагностика по фото</p>
+      <h1 class="serif">Что не так<br>с <em>вашей</em> машиной</h1>
+      <p class="lede">Скол, царапина, вмятина, ржавчина, пятно или соль в салоне, потёртость на руле или сиденье — сфотографируйте и получите описание проблемы, что с этим делать и ориентир по цене и времени.</p>
+      <button class="btn" onclick="document.getElementById('uploadCard').scrollIntoView({behavior:'smooth'})">Загрузить фото</button>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b>~10 сек</b><span>на анализ фото</span></div>
+    <div class="stat"><b>0 ₽</b><span>стоимость проверки</span></div>
+    <div class="stat"><b>3</b><span>фото за раз</span></div>
+  </div>
+
+  <div class="card" id="uploadCard">
+    <p class="eyebrow" style="color:var(--accent)">Новая оценка</p>
+
+    <label class="dropzone" id="dropzone" for="fileInput" style="margin-top:12px;display:block">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+      <div class="dz-title">Загрузите фото проблемного места</div>
+      <div class="dz-sub" id="dzSub">Кузов, салон или потёртости — до 3 фото, крупным планом, при дневном свете</div>
+    </label>
+    <input type="file" id="fileInput" accept="image/*" multiple>
+
+    <div class="thumbs" id="thumbs" hidden></div>
+
+    <button class="btn block" id="analyzeBtn" disabled>
+      <span id="analyzeLabel">Загрузите фото, чтобы начать</span>
+    </button>
+
+    <p class="status" id="status" hidden></p>
+    <div class="error" id="errorBox" hidden></div>
+
+    <div class="clarify" id="clarifyBox" hidden>
+      <p class="clarify-q" id="clarifyQuestion"></p>
+      <div class="clarify-row">
+        <input type="text" id="clarifyInput" placeholder="Ваш ответ">
+        <button class="btn" id="clarifySend">Ответить</button>
+      </div>
+    </div>
+
+    <div class="tips">
+      <b>Совет для точного результата:</b> снимайте при дневном свете, крупным планом на проблемную зону, без бликов и с расстояния 20–40 см.
+    </div>
+  </div>
+
+  <div class="card" id="resultCard">
+    <span class="example-tag" id="exampleTag">Пример оценки</span>
+    <div id="issuesContainer"></div>
+    <div style="display:flex; gap:10px; margin-top:4px;">
+      <button class="btn ghost block" id="shareBtn" hidden><span id="shareLabel">Поделиться результатом</span></button>
+      <button class="btn ghost block" id="resetBtn" hidden>Проверить другое фото</button>
+    </div>
+  </div>
+
+  <div class="card" id="howCard">
+    <p class="eyebrow" style="color:var(--accent)">Как это работает</p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-text"><b>Фото</b><p>Снимите проблемное место крупным планом, при хорошем свете.</p></div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-text"><b>Разбор</b><p>AI определяет тип проблемы — кузов, салон или износ — и оценивает серьёзность.</p></div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-text"><b>Оценка</b><p>Вы получаете описание, что делать, и ориентир по цене и времени.</p></div>
+      </div>
+    </div>
+    <p class="note" style="margin-top:16px;">АвтоСкан даёт предварительную AI-оценку по фотографии. Он не заменяет очный осмотр мастера и не всегда может увидеть скрытые повреждения (под бампером, внутри порогов и т.п.) — для точного диагноза и цены нужен осмотр вживую.</p>
+  </div>
+
+  <footer>АвтоСкан — предварительная оценка по фото. Точную цену и объём работ подтверждает мастер на месте.</footer>
+
+</div>
+
+<script>
+(function () {
+  var files = [];
+  var maxCount = 3;
+
+  var dropzone = document.getElementById('dropzone');
+  var fileInput = document.getElementById('fileInput');
+  var thumbs = document.getElementById('thumbs');
+  var analyzeBtn = document.getElementById('analyzeBtn');
+  var analyzeLabel = document.getElementById('analyzeLabel');
+  var statusEl = document.getElementById('status');
+  var errorBox = document.getElementById('errorBox');
+  var exampleTag = document.getElementById('exampleTag');
+  var clarifyBox = document.getElementById('clarifyBox');
+  var clarifyQuestion = document.getElementById('clarifyQuestion');
+  var clarifyInput = document.getElementById('clarifyInput');
+  var clarifySend = document.getElementById('clarifySend');
+
+  var issuesContainer = document.getElementById('issuesContainer');
+  var shareBtn = document.getElementById('shareBtn');
+  var shareLabel = document.getElementById('shareLabel');
+  var resetBtn = document.getElementById('resetBtn');
+
+  var pendingTurns = null;
+
+  function renderThumbs() {
+    thumbs.innerHTML = '';
+    thumbs.hidden = files.length === 0;
+    files.forEach(function (f, i) {
+      var url = URL.createObjectURL(f);
+      var div = document.createElement('div');
+      div.className = 'thumb';
+      div.innerHTML = '<img src="' + url + '" alt=""><button type="button" aria-label="Убрать">✕</button>';
+      div.querySelector('button').onclick = function () {
+        files.splice(i, 1);
+        renderThumbs();
+        updateButton();
+      };
+      thumbs.appendChild(div);
     });
+  }
 
-    var upstream = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-5',
-        max_tokens: 1500,
-        messages: messages
-      })
-    });
+  function updateButton() {
+    analyzeBtn.disabled = files.length === 0;
+    analyzeLabel.textContent = files.length === 0
+      ? 'Загрузите фото, чтобы начать'
+      : 'Получить оценку (' + files.length + ' фото)';
+  }
 
-    var data = await upstream.json().catch(function () { return null; });
+  function addFiles(list) {
+    var skippedType = false, skippedLimit = false;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].type.indexOf('image/') !== 0) { skippedType = true; continue; }
+      if (files.length >= maxCount) { skippedLimit = true; continue; }
+      files.push(list[i]);
+    }
+    renderThumbs();
+    updateButton();
+    clearError();
+    if (skippedLimit) showError('Можно загрузить максимум ' + maxCount + ' фото — лишние не добавлены.');
+    else if (skippedType) showError('Один из файлов — не изображение, он не добавлен.');
+  }
 
-    if (!upstream.ok) {
-      var msg = (data && data.error && data.error.message) || ('Upstream error ' + upstream.status);
-      res.status(upstream.status >= 400 && upstream.status < 500 ? 400 : 502).json({ error: 'upstream_error', message: msg });
-      return;
+  dropzone.addEventListener('click', function (e) { e.preventDefault(); fileInput.click(); });
+  fileInput.addEventListener('change', function () { addFiles(fileInput.files); fileInput.value = ''; });
+  ['dragover', 'dragenter'].forEach(function (evt) {
+    dropzone.addEventListener(evt, function (e) { e.preventDefault(); dropzone.classList.add('drag'); });
+  });
+  ['dragleave', 'drop'].forEach(function (evt) {
+    dropzone.addEventListener(evt, function (e) { e.preventDefault(); dropzone.classList.remove('drag'); });
+  });
+  dropzone.addEventListener('drop', function (e) {
+    if (e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files);
+  });
+
+  function showError(msg) {
+    errorBox.textContent = msg;
+    errorBox.hidden = false;
+  }
+  function clearError() { errorBox.hidden = true; }
+
+  var ERROR_COPY = {
+    bad_request: 'Что-то пошло не так с запросом — обновите страницу и попробуйте снова.',
+    server_misconfigured: 'Сервис временно недоступен — попробуйте позже.',
+    upstream_error: 'Небольшой сбой на стороне сервиса — попробуйте ещё раз.',
+    invalid_json: 'Ответ пришёл в неожиданном формате — нажмите ещё раз.',
+    server_error: 'Небольшой сбой — попробуйте ещё раз через минуту.',
+    network_error: 'Не удалось связаться с сервером — проверьте интернет-соединение и попробуйте снова.'
+  };
+
+  function showFriendlyError(e) {
+    var code = e && e.code;
+    showError(ERROR_COPY[code] || 'Не получилось получить оценку. Попробуйте ещё раз.');
+  }
+
+  function badgeClass(u) {
+    return u === 'high' ? 'high' : (u === 'low' ? 'low' : 'medium');
+  }
+  function badgeLabel(u) {
+    return u === 'high' ? 'Срочно' : (u === 'low' ? 'Не срочно' : 'Средне');
+  }
+  var SEVERITY_COLOR = { low: 'var(--success)', medium: 'var(--accent)', high: 'var(--danger)' };
+
+  var SERVICE_QUERY = {
+    'кузов': 'кузовной ремонт покраска авто',
+    'салон': 'химчистка салона автомобиля',
+    'износ': 'реставрация ремонт кожи салона авто'
+  };
+  function findMasterLink(category) {
+    var q = SERVICE_QUERY[category] || 'автосервис';
+    return 'https://yandex.ru/maps/?text=' + encodeURIComponent(q);
+  }
+
+  function formatPrice(pmin, pmax) {
+    var min = Number(pmin), max = Number(pmax);
+    if (!isFinite(min) || !isFinite(max) || (min <= 0 && max <= 0)) return '—';
+    min = Math.max(0, Math.round(min));
+    max = Math.max(0, Math.round(max));
+    if (min > max) { var t = min; min = max; max = t; }
+    return min.toLocaleString('ru-RU') + '–' + max.toLocaleString('ru-RU') + ' ₽';
+  }
+
+  function metricBox(label, value) {
+    var m = document.createElement('div'); m.className = 'metric';
+    var b = document.createElement('b'); b.textContent = label;
+    var span = document.createElement('span'); span.textContent = value;
+    m.appendChild(b); m.appendChild(span);
+    return m;
+  }
+
+  function buildIssueNode(issue) {
+    issue = issue || {};
+    var urgency = issue.urgency || 'medium';
+    var wrap = document.createElement('div');
+    wrap.className = 'issue-item';
+
+    if (issue.category) {
+      var cat = document.createElement('p');
+      cat.className = 'eyebrow';
+      cat.style.color = 'var(--muted)';
+      cat.style.marginBottom = '8px';
+      cat.textContent = String(issue.category).charAt(0).toUpperCase() + String(issue.category).slice(1);
+      wrap.appendChild(cat);
     }
 
-    var blocks = (data && data.content) || [];
-    var text = blocks.map(function (b) { return (b && b.text) || ''; }).join('');
+    var head = document.createElement('div');
+    head.className = 'result-head';
+    var h2 = document.createElement('h2');
+    h2.textContent = issue.problem ? String(issue.problem) : 'Результат оценки';
+    var badge = document.createElement('span');
+    badge.className = 'badge ' + badgeClass(urgency);
+    badge.textContent = badgeLabel(urgency);
+    head.appendChild(h2); head.appendChild(badge);
+    wrap.appendChild(head);
 
-    res.status(200).json({ text: text });
-  } catch (err) {
-    res.status(500).json({ error: 'server_error', message: String((err && err.message) || err) });
+    if (issue.description) {
+      var desc = document.createElement('p');
+      desc.className = 'desc';
+      desc.textContent = String(issue.description);
+      wrap.appendChild(desc);
+    }
+
+    if (issue.fix) {
+      var fixBox = document.createElement('div');
+      fixBox.className = 'fix';
+      fixBox.style.borderLeftColor = SEVERITY_COLOR[badgeClass(urgency)] || 'var(--accent)';
+      var b = document.createElement('b'); b.textContent = 'Что нужно сделать';
+      var span = document.createElement('span'); span.textContent = String(issue.fix);
+      fixBox.appendChild(b); fixBox.appendChild(span);
+      wrap.appendChild(fixBox);
+    }
+
+    var priceText = formatPrice(issue.price_min, issue.price_max);
+    var metrics = document.createElement('div');
+    metrics.className = 'metrics';
+    metrics.appendChild(metricBox('Ориентир по цене', priceText));
+    metrics.appendChild(metricBox('Время', issue.time_estimate ? String(issue.time_estimate) : '—'));
+    wrap.appendChild(metrics);
+
+    if (issue.if_ignored) {
+      var ign = document.createElement('p');
+      ign.className = 'ignored';
+      ign.textContent = '⚠ Если не чинить: ' + String(issue.if_ignored);
+      wrap.appendChild(ign);
+    }
+
+    if (issue.note) {
+      var note = document.createElement('p');
+      note.className = 'note';
+      note.textContent = String(issue.note);
+      wrap.appendChild(note);
+    }
+
+    if (priceText !== '—' && issue.category && SERVICE_QUERY[issue.category]) {
+      var link = document.createElement('a');
+      link.className = 'btn ghost small find-master';
+      link.href = findMasterLink(issue.category);
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = 'Найти мастера рядом →';
+      wrap.appendChild(link);
+    }
+
+    return { node: wrap, priceText: priceText, problem: h2.textContent, time: issue.time_estimate ? String(issue.time_estimate) : '—' };
   }
-};
+
+  var lastResultText = null;
+
+  function renderIssues(issues, opts) {
+    opts = opts || {};
+    issuesContainer.innerHTML = '';
+    exampleTag.hidden = !opts.isExample;
+    var summaries = [];
+    var anyPriced = false;
+    (issues || []).forEach(function (issue) {
+      var built = buildIssueNode(issue);
+      issuesContainer.appendChild(built.node);
+      if (built.priceText !== '—') anyPriced = true;
+      summaries.push(built.problem + ' — ' + built.priceText + (built.time !== '—' ? (', ' + built.time) : ''));
+    });
+    lastResultText = summaries.length ? summaries.join('\n') : null;
+    shareBtn.hidden = opts.isExample || !anyPriced;
+    resetBtn.hidden = opts.isExample;
+    if (!opts.isExample) {
+      document.getElementById('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
+  function shareResult() {
+    if (!lastResultText) return;
+    var text = 'АвтоСкан — оценка по фото:\n' + lastResultText + '\n\nПроверить свою машину: ' + location.href;
+    if (navigator.share) {
+      navigator.share({ text: text }).catch(function () {});
+      return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        shareLabel.textContent = 'Скопировано ✓';
+        setTimeout(function () { shareLabel.textContent = 'Поделиться результатом'; }, 1800);
+      }).catch(function () {});
+    }
+  }
+
+  function resetForm() {
+    files = [];
+    renderThumbs();
+    updateButton();
+    clearError();
+    clarifyBox.hidden = true;
+    pendingTurns = null;
+    renderIssues(EXAMPLE_ISSUES, { isExample: true });
+    document.getElementById('uploadCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  var EXAMPLE_ISSUES = [{
+    category: 'кузов',
+    problem: 'Скол лакокрасочного покрытия на бампере',
+    description: 'На фото виден локальный скол ЛКП до грунта размером около 1–2 см, вокруг — лёгкие потёртости. Коррозии не видно, повреждение свежее.',
+    fix: 'Локальная подкраска скола с полировкой перехода. Если сколов несколько — выгоднее сделать полную покраску детали.',
+    price_min: 4000, price_max: 8000,
+    time_estimate: '1–2 часа',
+    urgency: 'medium',
+    if_ignored: 'Скол может начать ржаветь изнутри, особенно зимой от реагентов — тогда ремонт подорожает.',
+    note: 'Это предварительная AI-оценка по фото. Точную цену и объём работ подтвердит мастер при осмотре машины.'
+  }];
+
+  var PRICE_REFERENCE_BODY =
+    'КУЗОВ / ЛАКОКРАСОЧНОЕ ПОКРЫТИЕ — ориентиры цен по России:\n' +
+    '- Скол/царапина, локальная подкраска без снятия детали: 2 000–6 000 ₽, 1–3 часа\n' +
+    '- Вмятина без повреждения краски (PDR, полировка не нужна): 2 000–7 000 ₽ в зависимости от размера (мелкая — от 2 000 ₽, крупная от 20 см — от 7 000 ₽), несколько часов\n' +
+    '- Вмятина с повреждением ЛКП (нужна покраска): 6 000–15 000 ₽, 1 день\n' +
+    '- Ржавчина, поверхностная (налёт, лёгкое вздутие краски): обработка преобразователем + локальная подкраска — 4 000–10 000 ₽, 1 день\n' +
+    '- Ржавчина, сквозная/глубокая (сквозные отверстия, требуется сварка/вставка): 15 000–35 000 ₽, 1–2 дня\n' +
+    '- Коррозия на металлическом колёсном диске (питтинг, шелушение краски): зачистка и покраска диска — 1 500–3 500 ₽ за диск, несколько часов\n' +
+    '- Профилактическая антикоррозийная обработка скрытых полостей/днища/арок (видимой ржавчины ещё нет, только профилактика): 6 000–16 000 ₽ в зависимости от класса авто, несколько часов\n' +
+    '- Полная покраска одного элемента кузова (дверь, крыло, капот, бампер целиком): 6 000–12 000 ₽ за элемент (плюс снятие/установка бампера — ещё около 2 000 ₽), 1 день';
+
+  var PRICE_REFERENCE_INTERIOR =
+    'САЛОН / ЧИСТКА (пятна, грязь, запах — поверхность цела, просто грязная) — ориентиры цен по России:\n' +
+    '- Точечное пятно на коврике или сиденье (соль, реагенты, локальная грязь) — точечная химчистка: 500–2 000 ₽, 1–2 часа\n' +
+    '- Химчистка одного коврика/ковролина целиком: 500–1 500 ₽, около часа\n' +
+    '- Химчистка одного сиденья (ткань или неглубокое загрязнение): 1 000–3 000 ₽, 1–2 часа\n' +
+    '- Полная химчистка всего салона (сиденья, ковролин, потолок, пластик) — зависит от класса авто: 4 000–9 500 ₽, 1 день\n' +
+    '- Удаление неприятного запаха (озонирование/дезинфекция): 1 000–5 000 ₽, несколько часов';
+
+  var PRICE_REFERENCE_WEAR =
+    'ИЗНОС / ПОТЁРТОСТИ (повреждена сама поверхность — кожа, ткань, пластик протёрлись, а не просто испачкались) — ориентиры цен по России:\n' +
+    '- Локальная потёртость на коже (сиденье, дверная карта, подлокотник) — закрашивание/реставрация пятна: 2 500–5 000 ₽, 1–2 часа\n' +
+    '- Потёртости/царапины на кожаном руле — перекраска руля целиком: 3 000–6 000 ₽, около часа\n' +
+    '- Сильный износ руля (трещины, протёртая до основы кожа) — перетяжка новой экокожей/кожей: 4 400–15 000 ₽, полдня\n' +
+    '- Потёртости/провисание потолка — требуется перетяжка новым материалом: от 23 000 ₽ (велюр) до 35 000+ ₽ (алькантара), 1–2 дня';
+
+  var PROMPT = 'Ты — опытный автомастер и мастер детейлинга, оцениваешь проблему(ы) по фото для клиента в России.\n\n' +
+    'Сначала определи ТИП каждой найденной проблемы:\n' +
+    '1) "кузов" — повреждение кузова/лакокрасочного покрытия снаружи машины (скол, царапина, вмятина, ржавчина/коррозия на кузове или дисках);\n' +
+    '2) "салон" — салон просто испачкан, поверхность цела (пятно, соль, реагенты, грязь, запах, шерсть животных и т.п.) — нужна чистка;\n' +
+    '3) "износ" — сама поверхность в салоне повреждена от использования (кожа/ткань/пластик протёрлись, потрескались, руль или потолок изношены) — нужна не чистка, а реставрация/перекраска/перетяжка.\n' +
+    'Используй соответствующие ориентиры цен ниже — не путай категории между собой.\n\n' +
+    PRICE_REFERENCE_BODY + '\n\n' +
+    PRICE_REFERENCE_INTERIOR + '\n\n' +
+    PRICE_REFERENCE_WEAR + '\n\n' +
+    'Это ориентиры среднего сегмента — используй их как опору и интерполируй по видимой на фото серьёзности проблемы, а не придумывай цифры произвольно.\n\n' +
+    'Правила:\n' +
+    '- Если на фото видно НЕСКОЛЬКО разных проблем (например скол и ржавчина рядом, или два разных пятна) — верни их отдельными объектами в массиве "issues" (не больше 3), от самой серьёзной к менее серьёзной.\n' +
+    '- Если фото нечёткое или не хватает важной детали, чтобы оценить точно (например неясно, это кузов или пластик, или неясен масштаб) — вместо того чтобы гадать, верни "need_clarification": true и короткий "clarify_question", а "issues" оставь пустым массивом []. Используй это только когда реально необходимо, не по умолчанию.\n' +
+    '- Для каждой проблемы добавь "if_ignored" — одно короткое предложение о том, как она будет ухудшаться и дорожать в ремонте, если её не чинить (если критичного ухудшения не будет — так и напиши коротко).\n\n' +
+    'Верни ТОЛЬКО JSON без пояснений, ровно такого вида:\n' +
+    '{"need_clarification": false, "clarify_question": "", "issues": [{' +
+    '"category": "кузов" | "салон" | "износ", ' +
+    '"problem": "краткое название проблемы (5-8 слов)", ' +
+    '"description": "что видно на фото и насколько это серьёзно, 1-2 предложения", ' +
+    '"fix": "что нужно сделать, чтобы это исправить, 1-2 предложения", ' +
+    '"price_min": целое число, "price_max": целое число (price_min <= price_max, ориентир в рублях RUB, округли до сотен), ' +
+    '"time_estimate": "например \'1-2 часа\' или \'1 день\'", ' +
+    '"urgency": "low" | "medium" | "high", ' +
+    '"if_ignored": "одно предложение", ' +
+    '"note": "одно предложение о том, что это предварительная оценка по фото, а точную цену называет мастер на месте"}]}\n' +
+    'Если на фото вообще не видно проблемы с автомобилем или оно совсем нечёткое — верни need_clarification:false и один issue, где в "problem" честно укажи, что не удалось распознать проблему, а price_min и price_max равны 0.';
+
+  function parseJSONLoose(text) {
+    if (typeof text !== 'string') return null;
+    try { return JSON.parse(text); } catch (e) {}
+    var fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenceMatch) {
+      try { return JSON.parse(fenceMatch[1].trim()); } catch (e) {}
+    }
+    var start = text.search(/[\{\[]/);
+    if (start !== -1) {
+      var openChar = text[start];
+      var closeChar = openChar === '{' ? '}' : ']';
+      var end = text.lastIndexOf(closeChar);
+      if (end > start) {
+        try { return JSON.parse(text.slice(start, end + 1)); } catch (e) {}
+      }
+    }
+    return null;
+  }
+
+  function fileToBase64(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        var result = reader.result || '';
+        var idx = result.indexOf(',');
+        resolve(idx !== -1 ? result.slice(idx + 1) : result);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function filesToImagePayload(fileList) {
+    var results = [];
+    for (var i = 0; i < fileList.length; i++) {
+      var f = fileList[i];
+      var data = await fileToBase64(f);
+      results.push({ mediaType: f.type || 'image/jpeg', data: data });
+    }
+    return results;
+  }
+
+  async function callAnalyze(turns, imageFiles) {
+    var images = imageFiles && imageFiles.length ? await filesToImagePayload(imageFiles) : [];
+    var resp;
+    try {
+      resp = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ turns: turns, images: images })
+      });
+    } catch (networkErr) {
+      var e0 = new Error('network_error');
+      e0.code = 'network_error';
+      throw e0;
+    }
+    var payload = null;
+    try { payload = await resp.json(); } catch (e) {}
+    if (!resp.ok) {
+      var err = new Error((payload && payload.message) || 'upstream_error');
+      err.code = (payload && payload.error) || 'upstream_error';
+      throw err;
+    }
+    var data = parseJSONLoose(payload && payload.text);
+    if (!data) {
+      var err2 = new Error('invalid_json');
+      err2.code = 'invalid_json';
+      throw err2;
+    }
+    return { data: data, rawText: payload.text };
+  }
+
+  function handleModelResponse(data, turnsSoFar, rawText) {
+    if (data && data.need_clarification && data.clarify_question) {
+      pendingTurns = turnsSoFar.concat([{ role: 'assistant', content: rawText }]);
+      clarifyQuestion.textContent = String(data.clarify_question);
+      clarifyBox.hidden = false;
+      clarifyInput.value = '';
+      clarifyInput.focus();
+      return;
+    }
+    var issues = (data && Array.isArray(data.issues)) ? data.issues : [];
+    renderIssues(issues, { isExample: false });
+  }
+
+  async function runAnalysis() {
+    if (files.length === 0) return;
+    clearError();
+    clarifyBox.hidden = true;
+    analyzeBtn.disabled = true;
+    statusEl.hidden = false;
+    statusEl.textContent = 'Осматриваем фото…';
+
+    try {
+      var turns = [{ role: 'user', content: PROMPT }];
+      var result = await callAnalyze(turns, files);
+      statusEl.hidden = true;
+      handleModelResponse(result.data, turns, result.rawText);
+    } catch (e) {
+      statusEl.hidden = true;
+      showFriendlyError(e);
+    } finally {
+      updateButton();
+    }
+  }
+
+  async function sendClarifyAnswer() {
+    var answer = clarifyInput.value.trim();
+    if (!answer || !pendingTurns) return;
+    clarifySend.disabled = true;
+    clarifyBox.hidden = true;
+    statusEl.hidden = false;
+    statusEl.textContent = 'Уточняем…';
+
+    var turns = pendingTurns.concat([{
+      role: 'user',
+      content: answer + '\n\nТеперь дай финальный ответ с массивом "issues", без нового уточняющего вопроса — этой информации достаточно.'
+    }]);
+
+    try {
+      var result = await callAnalyze(turns, files);
+      statusEl.hidden = true;
+      var issues = (result.data && Array.isArray(result.data.issues)) ? result.data.issues : [];
+      if (issues.length === 0) {
+        issues = [{
+          category: '', problem: 'Не удалось точно определить проблему',
+          description: 'Даже после уточнения не хватило информации по фото.',
+          fix: 'Попробуйте сфотографировать при более ярком свете или с другого ракурса.',
+          price_min: 0, price_max: 0, time_estimate: '—', urgency: 'low', if_ignored: '', note: ''
+        }];
+      }
+      renderIssues(issues, { isExample: false });
+    } catch (e) {
+      statusEl.hidden = true;
+      showFriendlyError(e);
+    } finally {
+      clarifySend.disabled = false;
+      pendingTurns = null;
+      updateButton();
+    }
+  }
+
+  analyzeBtn.addEventListener('click', runAnalysis);
+  shareBtn.addEventListener('click', shareResult);
+  resetBtn.addEventListener('click', resetForm);
+  clarifySend.addEventListener('click', sendClarifyAnswer);
+  clarifyInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendClarifyAnswer(); });
+
+  renderIssues(EXAMPLE_ISSUES, { isExample: true });
+})();
+</script>
+</body>
+</html>
