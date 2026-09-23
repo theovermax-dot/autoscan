@@ -281,6 +281,31 @@
   .tips{ margin-top:14px; padding:12px 14px; border-radius:6px; background:var(--surface-2); border:1px solid var(--border); font-size:12.5px; color:var(--muted); line-height:1.6; }
   .tips b{ color:var(--text); }
 
+  .review-form{
+    margin-top:14px; padding:14px; border-radius:8px; background:var(--surface-2);
+    border:1px solid var(--border-2); display:flex; flex-direction:column; gap:10px;
+  }
+  .review-form input[type=text], .review-form textarea{
+    width:100%; background:var(--bg-2); border:1px solid var(--border-2); border-radius:6px;
+    padding:10px 12px; color:var(--text); font-size:13.5px; font-family:inherit; resize:vertical;
+  }
+  .review-form input[type=text]:focus, .review-form textarea:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+  .stars-input{ display:flex; gap:4px; }
+  .stars-input button{
+    appearance:none; border:none; background:none; cursor:pointer; font-size:22px; line-height:1;
+    color:var(--border-2); padding:2px; transition:color .1s ease;
+  }
+  .stars-input button.active{ color:var(--warning); }
+
+  .review-item{ padding:14px 0; border-top:1px solid var(--border); }
+  .review-item:first-child{ border-top:none; padding-top:0; }
+  .review-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .review-name{ font-weight:600; font-size:14px; }
+  .review-stars{ color:var(--warning); font-size:13px; letter-spacing:1px; white-space:nowrap; }
+  .review-date{ color:var(--muted); font-size:11.5px; margin-top:2px; }
+  .review-text{ margin-top:8px; font-size:13.5px; line-height:1.55; color:var(--text); white-space:pre-wrap; }
+  .review-empty{ color:var(--muted); font-size:13px; text-align:center; padding:8px 0; }
+
   footer{ text-align:center; color:var(--muted); font-size:12px; margin-top:4px; }
 
   [hidden]{ display:none !important; }
@@ -299,6 +324,7 @@
     <div class="nav">
       <a href="#uploadCard">Оценка</a>
       <a href="#howCard">Как это работает</a>
+      <a href="#reviewsCard">Отзывы</a>
     </div>
   </div>
 
@@ -333,6 +359,7 @@
       <h1 class="serif">Что не так<br>с <em>вашей</em> машиной</h1>
       <p class="lede">Скол, царапина, вмятина, ржавчина, пятно или соль в салоне, потёртость на руле или сиденье — сфотографируйте и получите описание проблемы, что с этим делать и ориентир по цене и времени.</p>
       <button class="btn" onclick="document.getElementById('uploadCard').scrollIntoView({behavior:'smooth'})">Загрузить фото</button>
+      <p class="note" style="margin-top:16px;">📍 А ещё после оценки подскажем мастеров рядом, которые смогут это исправить.</p>
     </div>
   </div>
 
@@ -400,6 +427,32 @@
       </div>
     </div>
     <p class="note" style="margin-top:16px;">АвтоСкан даёт предварительную AI-оценку по фотографии. Он не заменяет очный осмотр мастера и не всегда может увидеть скрытые повреждения (под бампером, внутри порогов и т.п.) — для точного диагноза и цены нужен осмотр вживую.</p>
+  </div>
+
+  <div class="card" id="reviewsCard">
+    <div class="result-head" style="align-items:center;">
+      <p class="eyebrow" style="color:var(--accent); margin:0;">Отзывы</p>
+      <button class="btn ghost small" id="addReviewBtn">+ Оставить отзыв</button>
+    </div>
+
+    <div class="review-form" id="reviewForm" hidden>
+      <input type="text" id="reviewName" placeholder="Ваше имя" maxlength="60">
+      <div class="stars-input" id="starsInput">
+        <button type="button" data-value="1">★</button>
+        <button type="button" data-value="2">★</button>
+        <button type="button" data-value="3">★</button>
+        <button type="button" data-value="4">★</button>
+        <button type="button" data-value="5">★</button>
+      </div>
+      <textarea id="reviewText" placeholder="Расскажите о своём опыте с АвтоСканом" maxlength="500" rows="3"></textarea>
+      <button class="btn block" id="submitReviewBtn">Отправить отзыв</button>
+      <p class="status" id="reviewStatus" hidden></p>
+      <div class="error" id="reviewError" hidden></div>
+    </div>
+
+    <div id="reviewsList" style="margin-top:16px;">
+      <p class="status" id="reviewsLoading">Загружаем отзывы…</p>
+    </div>
   </div>
 
   <footer>АвтоСкан — предварительная оценка по фото. Точную цену и объём работ подтверждает мастер на месте.</footer>
@@ -876,6 +929,168 @@
   clarifyInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendClarifyAnswer(); });
 
   renderIssues(EXAMPLE_ISSUES, { isExample: true });
+
+  // ---- Отзывы ----
+  var addReviewBtn = document.getElementById('addReviewBtn');
+  var reviewForm = document.getElementById('reviewForm');
+  var reviewName = document.getElementById('reviewName');
+  var starsInput = document.getElementById('starsInput');
+  var reviewText = document.getElementById('reviewText');
+  var submitReviewBtn = document.getElementById('submitReviewBtn');
+  var reviewStatus = document.getElementById('reviewStatus');
+  var reviewError = document.getElementById('reviewError');
+  var reviewsList = document.getElementById('reviewsList');
+
+  var selectedRating = 5;
+
+  function paintStars() {
+    var btns = starsInput.querySelectorAll('button');
+    btns.forEach(function (b) {
+      b.classList.toggle('active', Number(b.getAttribute('data-value')) <= selectedRating);
+    });
+  }
+  starsInput.addEventListener('click', function (e) {
+    var btn = e.target.closest('button');
+    if (!btn) return;
+    selectedRating = Number(btn.getAttribute('data-value')) || 5;
+    paintStars();
+  });
+  paintStars();
+
+  addReviewBtn.addEventListener('click', function () {
+    reviewForm.hidden = !reviewForm.hidden;
+    if (!reviewForm.hidden) reviewName.focus();
+  });
+
+  function starsString(rating) {
+    rating = Math.max(1, Math.min(5, Math.round(Number(rating) || 5)));
+    return '★★★★★'.slice(0, rating) + '☆☆☆☆☆'.slice(0, 5 - rating);
+  }
+
+  function formatReviewDate(iso) {
+    try {
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+    } catch (e) { return ''; }
+  }
+
+  function buildReviewNode(r) {
+    var item = document.createElement('div');
+    item.className = 'review-item';
+
+    var head = document.createElement('div');
+    head.className = 'review-head';
+    var nameEl = document.createElement('span');
+    nameEl.className = 'review-name';
+    nameEl.textContent = (r && r.name) ? String(r.name) : 'Аноним';
+    var starsEl = document.createElement('span');
+    starsEl.className = 'review-stars';
+    starsEl.textContent = starsString(r && r.rating);
+    head.appendChild(nameEl); head.appendChild(starsEl);
+    item.appendChild(head);
+
+    var dateStr = formatReviewDate(r && r.date);
+    if (dateStr) {
+      var dateEl = document.createElement('div');
+      dateEl.className = 'review-date';
+      dateEl.textContent = dateStr;
+      item.appendChild(dateEl);
+    }
+
+    var textEl = document.createElement('p');
+    textEl.className = 'review-text';
+    textEl.textContent = (r && r.text) ? String(r.text) : '';
+    item.appendChild(textEl);
+
+    return item;
+  }
+
+  function renderReviews(reviews) {
+    reviewsList.innerHTML = '';
+    if (!reviews || reviews.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'review-empty';
+      empty.textContent = 'Пока нет отзывов — станьте первым!';
+      reviewsList.appendChild(empty);
+      return;
+    }
+    reviews.forEach(function (r) { reviewsList.appendChild(buildReviewNode(r)); });
+  }
+
+  async function loadReviews() {
+    try {
+      var resp = await fetch('/api/reviews');
+      var payload = await resp.json().catch(function () { return null; });
+      if (!resp.ok) throw new Error('load_failed');
+      renderReviews((payload && payload.reviews) || []);
+    } catch (e) {
+      reviewsList.innerHTML = '';
+      var err = document.createElement('p');
+      err.className = 'review-empty';
+      err.textContent = 'Не удалось загрузить отзывы — обновите страницу.';
+      reviewsList.appendChild(err);
+    }
+  }
+
+  var REVIEW_ERROR_COPY = {
+    bad_request: 'Проверьте имя и текст отзыва — что-то заполнено неверно.',
+    server_misconfigured: 'Отзывы временно недоступны — попробуйте позже.',
+    upstream_error: 'Не получилось сохранить отзыв — попробуйте ещё раз.',
+    server_error: 'Небольшой сбой — попробуйте ещё раз через минуту.',
+    network_error: 'Не удалось связаться с сервером — проверьте интернет-соединение.'
+  };
+
+  async function submitReview() {
+    var name = reviewName.value.trim();
+    var text = reviewText.value.trim();
+    reviewError.hidden = true;
+
+    if (!name) { reviewError.textContent = 'Введите имя.'; reviewError.hidden = false; return; }
+    if (text.length < 3) { reviewError.textContent = 'Напишите чуть подробнее об опыте.'; reviewError.hidden = false; return; }
+
+    submitReviewBtn.disabled = true;
+    reviewStatus.hidden = false;
+    reviewStatus.textContent = 'Отправляем…';
+
+    try {
+      var resp;
+      try {
+        resp = await fetch('/api/reviews', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: name, rating: selectedRating, text: text })
+        });
+      } catch (networkErr) {
+        throw { code: 'network_error' };
+      }
+      var payload = await resp.json().catch(function () { return null; });
+      if (!resp.ok) {
+        throw { code: (payload && payload.error) || 'upstream_error' };
+      }
+      var emptyEl = reviewsList.querySelector('.review-empty');
+      if (emptyEl) reviewsList.innerHTML = '';
+      if (payload && payload.review) {
+        reviewsList.insertBefore(buildReviewNode(payload.review), reviewsList.firstChild);
+      } else {
+        loadReviews();
+      }
+      reviewName.value = '';
+      reviewText.value = '';
+      selectedRating = 5;
+      paintStars();
+      reviewForm.hidden = true;
+    } catch (e) {
+      reviewError.textContent = REVIEW_ERROR_COPY[e && e.code] || 'Не получилось отправить отзыв. Попробуйте ещё раз.';
+      reviewError.hidden = false;
+    } finally {
+      reviewStatus.hidden = true;
+      submitReviewBtn.disabled = false;
+    }
+  }
+
+  submitReviewBtn.addEventListener('click', submitReview);
+  loadReviews();
 })();
 </script>
 </body>
