@@ -722,29 +722,57 @@
   var APP_LINK = 'https://t.me/autoscan_photo_bot/scan';
   var SITE_LINK = location.origin + location.pathname;
 
+  // Копирование, которое работает и во встроенном браузере Telegram на компьютере
+  function copyText(text) {
+    return new Promise(function (resolve, reject) {
+      function legacy() {
+        try {
+          var ta = document.createElement('textarea');
+          ta.value = text; ta.setAttribute('readonly', '');
+          ta.style.position = 'fixed'; ta.style.top = '-1000px'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
+          var ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          ok ? resolve() : reject(new Error('copy failed'));
+        } catch (e) { reject(e); }
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(resolve).catch(legacy);
+      } else { legacy(); }
+    });
+  }
+
+  function flashShareLabel(msg) {
+    shareLabel.textContent = msg;
+    setTimeout(function () { shareLabel.textContent = 'Поделиться результатом'; }, 2500);
+  }
+
+  // Telegram на компьютере не умеет открывать окно «Переслать» из мини-приложения — там копируем текст
+  var DESKTOP_PLATFORMS = ['tdesktop', 'macos', 'web', 'weba', 'webk', 'unigram', 'unknown'];
+
   function shareResult() {
     if (!lastResultText) return;
     var tg = window.Telegram && window.Telegram.WebApp;
     var inTelegram = !!(tg && tg.initData);
     var link = inTelegram ? APP_LINK : SITE_LINK;
     var body = '🚗 АвтоСкан — оценка по фото\n\n' + lastResultText + '\n\n📸 Проверь свою машину бесплатно 👇';
+    var full = body + '\n' + link;
+    var isDesktopTg = inTelegram && DESKTOP_PLATFORMS.indexOf(String(tg.platform || 'unknown')) !== -1;
 
-    if (inTelegram && tg.openTelegramLink) {
-      // нативное окно Telegram «Переслать в чат»
+    if (inTelegram && !isDesktopTg && tg.openTelegramLink) {
+      // телефон: нативное окно Telegram «Переслать в чат»
       tg.openTelegramLink('https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent(body));
       return;
     }
-    var full = body + '\n' + link;
-    if (navigator.share) {
+    if (!inTelegram && navigator.share) {
       navigator.share({ title: 'АвтоСкан', text: full }).catch(function () {});
       return;
     }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(full).then(function () {
-        shareLabel.textContent = 'Скопировано ✓';
-        setTimeout(function () { shareLabel.textContent = 'Поделиться результатом'; }, 1800);
-      }).catch(function () {});
-    }
+    copyText(full).then(function () {
+      flashShareLabel('Скопировано — вставьте в чат ✓');
+    }).catch(function () {
+      if (tg && tg.showAlert) tg.showAlert(full); else window.prompt('Скопируйте текст:', full);
+    });
   }
 
   function resetForm() {
