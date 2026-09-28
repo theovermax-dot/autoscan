@@ -573,7 +573,8 @@
     server_error: 'Небольшой сбой — попробуйте ещё раз через минуту.',
     network_error: 'Не удалось связаться с сервером — проверьте интернет-соединение и попробуйте снова.',
     rate_limited: 'Слишком много запросов подряд — подождите минуту и попробуйте снова.',
-    model_overloaded: 'Сервис сейчас перегружен — подождите полминуты и попробуйте ещё раз.'
+    model_overloaded: 'Сервис сейчас перегружен — подождите полминуты и попробуйте ещё раз.',
+    too_large: 'Фото слишком большое — попробуйте загрузить меньше фото или снять поближе.'
   };
 
   function showFriendlyError(e) {
@@ -857,19 +858,21 @@
   // Сжимаем фото перед отправкой: сторона до 1280px, JPEG ~82%.
   // Фото с телефона весит 3–6 МБ, после сжатия ~200–400 КБ — загрузка и анализ в разы быстрее.
   var MAX_SIDE = 1280;
-  function compressImage(file) {
+  var MAX_PAYLOAD_CHARS = 3000000; // лимит Vercel на запрос ~4.5 МБ, держим запас
+  function compressImage(file, maxSide, quality) {
+    maxSide = maxSide || MAX_SIDE; quality = quality || 0.82;
     return new Promise(function (resolve, reject) {
       var url = URL.createObjectURL(file);
       var img = new Image();
       img.onload = function () {
         try {
-          var scale = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+          var scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
           var w = Math.max(1, Math.round(img.naturalWidth * scale));
           var h = Math.max(1, Math.round(img.naturalHeight * scale));
           var canvas = document.createElement('canvas');
           canvas.width = w; canvas.height = h;
           canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-          var dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+          var dataUrl = canvas.toDataURL('image/jpeg', quality);
           URL.revokeObjectURL(url);
           resolve(dataUrl.slice(dataUrl.indexOf(',') + 1));
         } catch (e) { URL.revokeObjectURL(url); reject(e); }
@@ -879,18 +882,31 @@
     });
   }
 
-  async function filesToImagePayload(fileList) {
+  async function encodeAll(fileList, maxSide, quality) {
     var results = [];
     for (var i = 0; i < fileList.length; i++) {
       var f = fileList[i];
       try {
-        results.push({ mediaType: 'image/jpeg', data: await compressImage(f) });
+        results.push({ mediaType: 'image/jpeg', data: await compressImage(f, maxSide, quality) });
       } catch (e) {
-        // если браузер не смог сжать (редкий формат) — отправляем как есть
+        // браузер не смог сжать (редкий формат) — отправляем как есть
         results.push({ mediaType: f.type || 'image/jpeg', data: await fileToBase64(f) });
       }
     }
     return results;
+  }
+  function payloadSize(images) {
+    return images.reduce(function (n, im) { return n + (im.data ? im.data.length : 0); }, 0);
+  }
+
+  async function filesToImagePayload(fileList) {
+    var images = await encodeAll(fileList, MAX_SIDE, 0.82);
+    if (payloadSize(images) > MAX_PAYLOAD_CHARS) images = await encodeAll(fileList, 1024, 0.7);
+    if (payloadSize(images) > MAX_PAYLOAD_CHARS) images = await encodeAll(fileList, 800, 0.6);
+    if (payloadSize(images) > MAX_PAYLOAD_CHARS) {
+      var err = new Error('too_large'); err.code = 'too_large'; throw err;
+    }
+    return images;
   }
 
   // Бесплатный Gemini иногда отвечает «перегружен» — тогда тихо ждём и пробуем ещё раз,
@@ -904,7 +920,7 @@
       try {
         return await callAnalyzeOnce(turns, images);
       } catch (e) {
-        var retryable = e && (e.code === 'model_overloaded' || e.code === 'rate_limited');
+        var retryable = e && ['model_overloaded', 'rate_limited', 'upstream_error', 'server_error', 'invalid_json'].indexOf(e.code) !== -1;
         if (!retryable || attempt >= RETRY_DELAYS_MS.length) throw e;
         if (statusEl) {
           statusEl.hidden = false;
@@ -927,6 +943,9 @@
       var e0 = new Error('network_error');
       e0.code = 'network_error';
       throw e0;
+    }
+    if (resp.status === 413) {
+      var e413 = new Error('too_large'); e413.code = 'too_large'; throw e413;
     }
     var payload = null;
     try { payload = await resp.json(); } catch (e) {}
