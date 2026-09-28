@@ -847,8 +847,29 @@
     return results;
   }
 
+  // Бесплатный Gemini иногда отвечает «перегружен» — тогда тихо ждём и пробуем ещё раз,
+  // а пользователь видит «Анализируем…», а не ошибку.
+  var RETRY_DELAYS_MS = [12000, 15000];
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
   async function callAnalyze(turns, imageFiles) {
     var images = imageFiles && imageFiles.length ? await filesToImagePayload(imageFiles) : [];
+    for (var attempt = 0; ; attempt++) {
+      try {
+        return await callAnalyzeOnce(turns, images);
+      } catch (e) {
+        var retryable = e && (e.code === 'model_overloaded' || e.code === 'rate_limited');
+        if (!retryable || attempt >= RETRY_DELAYS_MS.length) throw e;
+        if (statusEl) {
+          statusEl.hidden = false;
+          statusEl.textContent = 'Сервис сейчас загружен — анализируем, это займёт ещё немного времени…';
+        }
+        await sleep(RETRY_DELAYS_MS[attempt]);
+      }
+    }
+  }
+
+  async function callAnalyzeOnce(turns, images) {
     var resp;
     try {
       resp = await fetch('/api/analyze', {
