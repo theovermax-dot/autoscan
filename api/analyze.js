@@ -1,7 +1,96 @@
-// Серверная функция для Vercel: принимает фото + переписку с фронтенда
-// и обращается к бесплатному Google Gemini API (Google AI Studio) от имени владельца сайта.
-// Ключ берётся из переменной окружения GEMINI_API_KEY.
+// Серверная функция для Vercel: принимает фото + переписку с фронтенда и отдаёт ответ ИИ.
+//
+// Два бесплатных провайдера по очереди:
+//   1) Google Gemini (ключ GEMINI_API_KEY) — лучшее качество, но на бесплатном тарифе бывает «перегружен»;
+//   2) Groq, модель Llama 4 Scout (ключ GROQ_API_KEY) — очень быстрый, подхватывает, если Gemini не ответил.
+// Если какого-то ключа нет — этот провайдер просто пропускается.
 // Никаких npm-зависимостей не требуется — используется встроенный fetch (Node.js 18+).
+
+var GEMINI_MODELS = ['gemini-flash-latest', 'gemini-3.6-flash'];
+var GROQ_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+var CALL_TIMEOUT_MS = 20000;
+
+function fetchWithTimeout(url, options, ms) {
+  var ctrl = new AbortController();
+  var timer = setTimeout(function () { ctrl.abort(); }, ms);
+  return fetch(url, Object.assign({}, options, { signal: ctrl.signal }))
+    .finally(function () { clearTimeout(timer); });
+}
+
+async function tryGemini(apiKey, turns, images) {
+  var contents = turns.map(function (t, idx) {
+    var isLastUser = idx === turns.length - 1 && t.role === 'user';
+    var parts = [{ text: String(t.content || '') }];
+    if (isLastUser) {
+      images.forEach(function (img) {
+        parts.push({ inline_data: { mime_type: img.mediaType || 'image/jpeg', data: img.data } });
+      });
+    }
+    return { role: t.role === 'assistant' ? 'model' : 'user', parts: parts };
+  });
+  var body = JSON.stringify({
+    contents: contents,
+    generationConfig: { maxOutputTokens: 2048, response_mime_type: 'application/json' }
+  });
+
+  for (var i = 0; i < GEMINI_MODELS.length; i++) {
+    var model = GEMINI_MODELS[i];
+    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model +
+      ':generateContent?key=' + encodeURIComponent(apiKey);
+    try {
+      var r = await fetchWithTimeout(url, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: body
+      }, CALL_TIMEOUT_MS);
+      var data = await r.json().catch(function () { return null; });
+      if (r.ok) {
+        var cand = data && Array.isArray(data.candidates) ? data.candidates[0] : null;
+        var parts = cand && cand.content && Array.isArray(cand.content.parts) ? cand.content.parts : [];
+        var text = parts.map(function (p) { return (p && p.text) || ''; }).join('');
+        if (text) return { ok: true, text: text, provider: 'gemini:' + model };
+        console.error('Gemini empty [' + model + '] finishReason:', cand && cand.finishReason);
+        continue;
+      }
+      console.error('Gemini error [' + model + ']', r.status, (data && data.error && data.error.message) || '');
+      if (r.status === 400) return { ok: false, status: 400, message: (data && data.error && data.error.message) || 'bad request' };
+    } catch (e) {
+      console.error('Gemini timeout/network [' + model + ']', String((e && e.message) || e));
+    }
+  }
+  return { ok: false, status: 503 };
+}
+
+async function tryGroq(apiKey, turns, images) {
+  var messages = turns.map(function (t, idx) {
+    var isLastUser = idx === turns.length - 1 && t.role === 'user';
+    if (!isLastUser || images.length === 0) {
+      return { role: t.role === 'assistant' ? 'assistant' : 'user', content: String(t.content || '') };
+    }
+    var content = [{ type: 'text', text: String(t.content || '') }];
+    images.forEach(function (img) {
+      content.push({ type: 'image_url', image_url: { url: 'data:' + (img.mediaType || 'image/jpeg') + ';base64,' + img.data } });
+    });
+    return { role: 'user', content: content };
+  });
+  try {
+    var r = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'authorization': 'Bearer ' + apiKey },
+      body: JSON.stringify({ model: GROQ_MODEL, messages: messages, temperature: 0.3, max_completion_tokens: 2048 })
+    }, CALL_TIMEOUT_MS);
+    var data = await r.json().catch(function () { return null; });
+    if (r.ok) {
+      var text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+      if (text) return { ok: true, text: text, provider: 'groq' };
+      console.error('Groq empty response');
+      return { ok: false, status: 502 };
+    }
+    console.error('Groq error', r.status, (data && data.error && data.error.message) || '');
+    return { ok: false, status: r.status === 429 ? 429 : 503 };
+  } catch (e) {
+    console.error('Groq timeout/network', String((e && e.message) || e));
+    return { ok: false, status: 503 };
+  }
+}
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -9,9 +98,10 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  var apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    res.status(500).json({ error: 'server_misconfigured', message: 'GEMINI_API_KEY is not set' });
+  var geminiKey = process.env.GEMINI_API_KEY;
+  var groqKey = process.env.GROQ_API_KEY;
+  if (!geminiKey && !groqKey) {
+    res.status(500).json({ error: 'server_misconfigured', message: 'No AI API keys set' });
     return;
   }
 
@@ -19,10 +109,8 @@ module.exports = async function handler(req, res) {
   if (typeof body === 'string') {
     try { body = JSON.parse(body); } catch (e) { body = null; }
   }
-
   var turns = body && Array.isArray(body.turns) ? body.turns : null;
   var images = body && Array.isArray(body.images) ? body.images : [];
-
   if (!turns || turns.length === 0) {
     res.status(400).json({ error: 'bad_request', message: 'turns is required' });
     return;
@@ -33,97 +121,24 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    var contents = turns.map(function (t, idx) {
-      var isLastUser = idx === turns.length - 1 && t.role === 'user';
-      var parts = [{ text: String(t.content || '') }];
-      if (isLastUser && images.length > 0) {
-        images.forEach(function (img) {
-          parts.push({
-            inline_data: {
-              mime_type: img.mediaType || 'image/jpeg',
-              data: img.data
-            }
-          });
-        });
-      }
-      return { role: t.role === 'assistant' ? 'model' : 'user', parts: parts };
-    });
+    var result = { ok: false, status: 503 };
+    if (geminiKey) result = await tryGemini(geminiKey, turns, images);
+    if (!result.ok && result.status !== 400 && groqKey) result = await tryGroq(groqKey, turns, images);
 
-    // Цепочка моделей: если одна перегружена (503), упёрлась в лимит (429) или недоступна
-    // для этого ключа (404/403) — пробуем следующую. У каждой модели своя очередь и квота.
-    var models = [
-      'gemini-flash-latest',
-      'gemini-3.7-flash',
-      'gemini-3.6-flash',
-      'gemini-flash-lite-latest',
-      'gemini-3.5-flash-lite',
-      'gemini-3.1-flash-lite'
-    ];
-    var requestBody = JSON.stringify({
-      contents: contents,
-      generationConfig: { maxOutputTokens: 2048, response_mime_type: 'application/json' }
-    });
-
-    function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
-
-    var upstream, data;
-    var sawOverload = false;
-    outer:
-    for (var m = 0; m < models.length; m++) {
-      var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + models[m] + ':generateContent?key=' + encodeURIComponent(apiKey);
-      var attemptsPerModel = m === 0 ? 2 : 1;   // основной модели — 2 попытки, запасным — по 1
-      for (var attempt = 1; attempt <= attemptsPerModel; attempt++) {
-        upstream = await fetch(url, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: requestBody
-        });
-        data = await upstream.json().catch(function () { return null; });
-
-        if (upstream.ok) break outer;
-
-        console.error('Gemini error [' + models[m] + '] attempt ' + attempt + '/' + attemptsPerModel, upstream.status, (data && data.error && data.error.message) || '');
-        var isOverloaded = upstream.status === 503 || upstream.status === 429;
-        var isUnavailable = upstream.status === 404 || upstream.status === 403;
-        if (isOverloaded) sawOverload = true;
-        if (isUnavailable) continue outer;             // модель недоступна — сразу к следующей
-        if (!isOverloaded) break outer;                // другая ошибка (например, битый запрос) — не перебираем
-        if (attempt < attemptsPerModel) await wait(attempt * 700);
-      }
-    }
-
-    // если последняя модель просто недоступна, а до этого были перегрузки — честно говорим «перегружено»
-    if (!upstream.ok && sawOverload && (upstream.status === 404 || upstream.status === 403)) {
-      res.status(503).json({ error: 'model_overloaded', message: 'All models overloaded or unavailable' });
+    if (result.ok) {
+      console.log('Answered by', result.provider);
+      res.status(200).json({ text: result.text });
       return;
     }
-
-    if (!upstream.ok) {
-      var msg = (data && data.error && data.error.message) || ('Upstream error ' + upstream.status);
-      if (upstream.status === 429) {
-        res.status(429).json({ error: 'rate_limited', message: msg });
-        return;
-      }
-      if (upstream.status === 503) {
-        res.status(503).json({ error: 'model_overloaded', message: msg });
-        return;
-      }
-      res.status(upstream.status >= 400 && upstream.status < 500 ? 400 : 502).json({ error: 'upstream_error', message: msg });
+    if (result.status === 400) {
+      res.status(400).json({ error: 'upstream_error', message: result.message || 'bad request' });
       return;
     }
-
-    var candidate = data && Array.isArray(data.candidates) ? data.candidates[0] : null;
-    var parts = candidate && candidate.content && Array.isArray(candidate.content.parts) ? candidate.content.parts : [];
-    var text = parts.map(function (p) { return (p && p.text) || ''; }).join('');
-
-    if (!text) {
-      var reason = candidate && candidate.finishReason;
-      console.error('Gemini empty response, finishReason:', reason, JSON.stringify(data));
-      res.status(502).json({ error: 'upstream_error', message: 'Empty response from model (finishReason: ' + reason + ')' });
+    if (result.status === 429) {
+      res.status(429).json({ error: 'rate_limited', message: 'Rate limited' });
       return;
     }
-
-    res.status(200).json({ text: text });
+    res.status(503).json({ error: 'model_overloaded', message: 'All providers busy' });
   } catch (err) {
     console.error('analyze.js crashed:', err);
     res.status(500).json({ error: 'server_error', message: String((err && err.message) || err) });
