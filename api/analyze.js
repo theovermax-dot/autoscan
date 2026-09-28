@@ -52,7 +52,6 @@ async function tryGemini(apiKey, turns, images) {
         continue;
       }
       console.error('Gemini error [' + model + ']', r.status, (data && data.error && data.error.message) || '');
-      if (r.status === 400) return { ok: false, status: 400, message: (data && data.error && data.error.message) || 'bad request' };
     } catch (e) {
       console.error('Gemini timeout/network [' + model + ']', String((e && e.message) || e));
     }
@@ -133,7 +132,7 @@ module.exports = async function handler(req, res) {
   try {
     var result = { ok: false, status: 503 };
     if (geminiKey) result = await tryGemini(geminiKey, turns, images);
-    if (!result.ok && result.status !== 400 && groqKey) result = await tryGroq(groqKey, turns, images);
+    if (!result.ok && groqKey) result = await tryGroq(groqKey, turns, images);
 
     if (result.ok) {
       console.log('Answered by', result.provider);
