@@ -668,7 +668,9 @@
     if (issue.if_ignored) {
       var ign = document.createElement('p');
       ign.className = 'ignored';
-      ign.textContent = '⚠ Если не чинить: ' + String(issue.if_ignored);
+      var ignText = String(issue.if_ignored).trim();
+      ignText = ignText.charAt(0).toLowerCase() + ignText.slice(1);
+      ign.textContent = '⚠ Если отложить: ' + ignText;
       wrap.appendChild(ign);
     }
 
@@ -837,12 +839,41 @@
     });
   }
 
+  // Сжимаем фото перед отправкой: сторона до 1280px, JPEG ~82%.
+  // Фото с телефона весит 3–6 МБ, после сжатия ~200–400 КБ — загрузка и анализ в разы быстрее.
+  var MAX_SIDE = 1280;
+  function compressImage(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var scale = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+          var w = Math.max(1, Math.round(img.naturalWidth * scale));
+          var h = Math.max(1, Math.round(img.naturalHeight * scale));
+          var canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          var dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+          URL.revokeObjectURL(url);
+          resolve(dataUrl.slice(dataUrl.indexOf(',') + 1));
+        } catch (e) { URL.revokeObjectURL(url); reject(e); }
+      };
+      img.onerror = function (e) { URL.revokeObjectURL(url); reject(e); };
+      img.src = url;
+    });
+  }
+
   async function filesToImagePayload(fileList) {
     var results = [];
     for (var i = 0; i < fileList.length; i++) {
       var f = fileList[i];
-      var data = await fileToBase64(f);
-      results.push({ mediaType: f.type || 'image/jpeg', data: data });
+      try {
+        results.push({ mediaType: 'image/jpeg', data: await compressImage(f) });
+      } catch (e) {
+        // если браузер не смог сжать (редкий формат) — отправляем как есть
+        results.push({ mediaType: f.type || 'image/jpeg', data: await fileToBase64(f) });
+      }
     }
     return results;
   }
