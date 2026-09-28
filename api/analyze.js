@@ -2,12 +2,13 @@
 //
 // Два бесплатных провайдера по очереди:
 //   1) Google Gemini (ключ GEMINI_API_KEY) — лучшее качество, но на бесплатном тарифе бывает «перегружен»;
-//   2) Groq, модель Llama 4 Scout (ключ GROQ_API_KEY) — очень быстрый, подхватывает, если Gemini не ответил.
+//   2) Groq, модель Qwen (ключ GROQ_API_KEY) — очень быстрый, подхватывает, если Gemini не ответил.
 // Если какого-то ключа нет — этот провайдер просто пропускается.
 // Никаких npm-зависимостей не требуется — используется встроенный fetch (Node.js 18+).
 
 var GEMINI_MODELS = ['gemini-flash-latest', 'gemini-3.6-flash'];
-var GROQ_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+// На Groq сейчас одна модель с поддержкой фото — https://console.groq.com/docs/vision
+var GROQ_MODEL = 'qwen/qwen3.8-27b';
 var CALL_TIMEOUT_MS = 20000;
 
 function fetchWithTimeout(url, options, ms) {
@@ -71,25 +72,34 @@ async function tryGroq(apiKey, turns, images) {
     });
     return { role: 'user', content: content };
   });
-  try {
-    var r = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'authorization': 'Bearer ' + apiKey },
-      body: JSON.stringify({ model: GROQ_MODEL, messages: messages, temperature: 0.3, max_completion_tokens: 2048 })
-    }, CALL_TIMEOUT_MS);
-    var data = await r.json().catch(function () { return null; });
-    if (r.ok) {
-      var text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-      if (text) return { ok: true, text: text, provider: 'groq' };
-      console.error('Groq empty response');
-      return { ok: false, status: 502 };
+  // Qwen умеет «думать вслух» — просим скрыть рассуждения; если параметр не поддержан, пробуем без него
+  var variants = [{ reasoning_format: 'hidden' }, {}];
+  for (var v = 0; v < variants.length; v++) {
+    try {
+      var payload = Object.assign({ model: GROQ_MODEL, messages: messages, temperature: 0.3, max_completion_tokens: 4096 }, variants[v]);
+      var r = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'authorization': 'Bearer ' + apiKey },
+        body: JSON.stringify(payload)
+      }, CALL_TIMEOUT_MS);
+      var data = await r.json().catch(function () { return null; });
+      if (r.ok) {
+        var text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+        if (text) text = String(text).replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+        if (text) return { ok: true, text: text, provider: 'groq:' + GROQ_MODEL };
+        console.error('Groq empty response');
+        return { ok: false, status: 502 };
+      }
+      var msg = (data && data.error && data.error.message) || '';
+      console.error('Groq error', r.status, msg);
+      if (r.status === 400 && v === 0) continue;   // возможно, не поддержан reasoning_format — пробуем без него
+      return { ok: false, status: r.status === 429 ? 429 : 503 };
+    } catch (e) {
+      console.error('Groq timeout/network', String((e && e.message) || e));
+      return { ok: false, status: 503 };
     }
-    console.error('Groq error', r.status, (data && data.error && data.error.message) || '');
-    return { ok: false, status: r.status === 429 ? 429 : 503 };
-  } catch (e) {
-    console.error('Groq timeout/network', String((e && e.message) || e));
-    return { ok: false, status: 503 };
   }
+  return { ok: false, status: 503 };
 }
 
 module.exports = async function handler(req, res) {
