@@ -706,9 +706,10 @@
       var built = buildIssueNode(issue);
       issuesContainer.appendChild(built.node);
       if (built.priceText !== '—') anyPriced = true;
-      summaries.push(built.problem + ' — ' + built.priceText + (built.time !== '—' ? (', ' + built.time) : ''));
+      var line = '🔧 ' + built.problem + '\n💰 ' + built.priceText + (built.time !== '—' ? ('  ·  ⏱ ' + built.time) : '');
+      summaries.push(line);
     });
-    lastResultText = summaries.length ? summaries.join('\n') : null;
+    lastResultText = summaries.length ? summaries.join('\n\n') : null;
     shareBtn.hidden = opts.isExample || !anyPriced;
     resetBtn.hidden = opts.isExample;
     if (!opts.isExample) {
@@ -716,15 +717,29 @@
     }
   }
 
+  // Чистая ссылка для «Поделиться»: без служебных данных Telegram в адресе
+  var APP_LINK = 'https://t.me/autoscan_photo_bot/scan';
+  var SITE_LINK = location.origin + location.pathname;
+
   function shareResult() {
     if (!lastResultText) return;
-    var text = 'АвтоСкан — оценка по фото:\n' + lastResultText + '\n\nПроверить свою машину: ' + location.href;
+    var tg = window.Telegram && window.Telegram.WebApp;
+    var inTelegram = !!(tg && tg.initData);
+    var link = inTelegram ? APP_LINK : SITE_LINK;
+    var body = '🚗 АвтоСкан — оценка по фото\n\n' + lastResultText + '\n\n📸 Проверь свою машину бесплатно 👇';
+
+    if (inTelegram && tg.openTelegramLink) {
+      // нативное окно Telegram «Переслать в чат»
+      tg.openTelegramLink('https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent(body));
+      return;
+    }
+    var full = body + '\n' + link;
     if (navigator.share) {
-      navigator.share({ text: text }).catch(function () {});
+      navigator.share({ title: 'АвтоСкан', text: full }).catch(function () {});
       return;
     }
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(function () {
+      navigator.clipboard.writeText(full).then(function () {
         shareLabel.textContent = 'Скопировано ✓';
         setTimeout(function () { shareLabel.textContent = 'Поделиться результатом'; }, 1800);
       }).catch(function () {});
